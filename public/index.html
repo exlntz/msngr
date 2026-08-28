@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Опал — мессенджер</title>
+<meta name="description" content="Опал — мессенджер из жидкого стекла. Приватные чаты, фото, файлы, голосовые сообщения.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23c3ff6e'/%3E%3Cstop offset='.5' stop-color='%235ee8c8'/%3E%3Cstop offset='1' stop-color='%23b78cff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M50 4C72 4 96 26 96 52 96 76 74 96 50 96 26 96 4 74 4 50 4 26 28 4 50 4Z' fill='url(%23g)'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="/fonts/fonts.css">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<!-- фоновая аурора -->
+<div class="aurora" aria-hidden="true">
+  <div class="blob blob-a"></div>
+  <div class="blob blob-b"></div>
+  <div class="blob blob-c"></div>
+  <div class="blob blob-d"></div>
+</div>
+<div class="grain" aria-hidden="true"></div>
+
+<!-- фильтр преломления для жидкого стекла -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquid-refraction" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.008 0.012" numOctaves="2" seed="92" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="2.2" result="soft"/>
+      <feDisplacementMap in="SourceGraphic" in2="soft" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+</svg>
+
+<!-- ЭКРАН ВХОДА -->
+<div class="auth-screen" id="authScreen">
+  <div class="auth-card glass-strong">
+    <div class="auth-logo">
+      <div class="opal-gem"><div class="gem-core"></div></div>
+      <h1>Опал</h1>
+      <p class="auth-sub">мессенджер из жидкого стекла</p>
+    </div>
+
+    <form id="authForm" class="auth-form" novalidate>
+      <div class="field">
+        <label for="authUsername">Юзернейм</label>
+        <input id="authUsername" name="username" type="text" autocomplete="username"
+               placeholder="например, night_owl" maxlength="20" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="authPassword">Пароль</label>
+        <div class="password-wrap">
+          <input id="authPassword" name="password" type="password" autocomplete="current-password"
+                 placeholder="••••••••" maxlength="100">
+          <button type="button" class="eye-btn" id="eyeBtn" tabindex="-1" aria-label="Показать пароль"></button>
+        </div>
+      </div>
+      <div class="field" id="nameField" hidden>
+        <label for="authName">Как тебя показывать <span class="optional">— можно пропустить</span></label>
+        <input id="authName" name="display_name" type="text" placeholder="Твоё имя" maxlength="40">
+      </div>
+
+      <div class="auth-error" id="authError" hidden></div>
+
+      <button type="submit" class="btn-primary" id="authSubmit">
+        <span id="authSubmitText">Войти</span>
+        <span class="btn-shine" aria-hidden="true"></span>
+      </button>
+
+      <div class="auth-switch">
+        <span id="authSwitchText">Впервые здесь?</span>
+        <button type="button" id="authModeBtn" class="link-btn">Создать аккаунт</button>
+      </div>
+    </form>
+  </div>
+  <p class="auth-footnote">Данные живут только на твоём сервере</p>
+</div>
+
+<!-- ПРИЛОЖЕНИЕ -->
+<div class="app" id="app" hidden>
+
+  <!-- САЙДБАР -->
+  <aside class="sidebar glass-strong" id="sidebar">
+    <header class="side-head">
+      <button class="me-chip" id="meChip" title="Мой профиль">
+        <span class="avatar av-32" id="meAvatar"></span>
+        <span class="me-meta">
+          <span class="me-name" id="meName">…</span>
+          <span class="me-username" id="meUsername">@…</span>
+        </span>
+      </button>
+      <div class="brand" aria-hidden="true">
+        <div class="opal-gem gem-sm"><div class="gem-core"></div></div>
+        <span class="brand-name">Опал</span>
+      </div>
+    </header>
+
+    <div class="search-wrap">
+      <div class="search-pill">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.2-3.2"/></svg>
+        <input id="searchInput" type="text" placeholder="Найти человека…" autocomplete="off" spellcheck="false">
+        <button class="search-clear" id="searchClear" hidden aria-label="Очистить">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="side-scroll" id="chatList">
+      <!-- сюда рендерится список чатов / поиска -->
+    </div>
+  </aside>
+
+  <!-- ЧАТ -->
+  <main class="chat-pane" id="chatPane">
+    <div class="chat-empty glass-strong" id="chatEmpty">
+      <div class="opal-gem gem-lg"><div class="gem-core"></div></div>
+      <h2>Выбери, кому написать</h2>
+      <p>Найди друга по юзернейму в поиске слева —<br>и переписка начнётся мгновенно</p>
+    </div>
+
+    <section class="chat-window glass-strong" id="chatWindow" hidden>
+      <header class="chat-head">
+        <button class="icon-btn back-btn" id="backBtn" aria-label="Назад">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
+        <div class="peer-brief" id="peerBrief">
+          <span class="avatar av-40" id="peerAvatar"></span>
+          <span class="peer-meta">
+            <span class="peer-name" id="peerName">…</span>
+            <span class="peer-status" id="peerStatus"></span>
+          </span>
+        </div>
+        <div class="head-actions">
+          <button class="icon-btn" id="scrollDownBtn" title="Вниз" hidden>
+            <svg viewBox="0 0 24 24" class="ic"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="messages-scroll" id="messagesScroll">
+        <div class="messages-list" id="messagesList"></div>
+        <button class="jump-down" id="jumpDown" hidden>
+          <svg viewBox="0 0 24 24" class="ic"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+          <span class="jump-badge" id="jumpBadge" hidden></span>
+        </button>
+      </div>
+
+      <!-- цитируемое сообщение -->
+      <div class="reply-bar" id="replyBar" hidden>
+        <div class="reply-quote">
+          <div class="reply-line"></div>
+          <div class="reply-info">
+            <span class="reply-name" id="replyName"></span>
+            <span class="reply-preview" id="replyPreview"></span>
+          </div>
+        </div>
+        <button class="icon-btn" id="replyCancel" aria-label="Отменить цитату">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+
+      <!-- превью вложения -->
+      <div class="attach-bar" id="attachBar" hidden>
+        <div class="attach-thumb" id="attachThumb"></div>
+        <div class="attach-info">
+          <span class="attach-name" id="attachName"></span>
+          <span class="attach-size" id="attachSize"></span>
+        </div>
+        <button class="icon-btn" id="attachCancel" aria-label="Убрать вложение">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+
+      <footer class="composer glass" id="composer">
+        <button class="round-btn" id="attachBtn" title="Прикрепить" aria-label="Прикрепить файл">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <div class="composer-menu" id="attachMenu" hidden>
+          <button class="menu-item" id="menuPhoto">
+            <svg viewBox="0 0 24 24" class="ic"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 17l4.6-4.6a1.4 1.4 0 0 1 2 0L16 17.3M14.5 14l1.7-1.7a1.4 1.4 0 0 1 2 0L21 15"/></svg>
+            Фото
+          </button>
+          <button class="menu-item" id="menuFile">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9l-6-6Z"/><path d="M13 3v6h6"/></svg>
+            Файл
+          </button>
+          <button class="menu-item" id="menuEmoji">
+            <svg viewBox="0 0 24 24" class="ic"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5s1.2 1.8 3.5 1.8 3.5-1.8 3.5-1.8"/><path d="M9 9.6h.01M15 9.6h.01" stroke-linecap="round" stroke-width="2.4"/></svg>
+            Эмодзи
+          </button>
+        </div>
+        <div class="emoji-panel glass-strong" id="emojiPanel" hidden></div>
+
+        <textarea id="msgInput" rows="1" placeholder="Сообщение…" maxlength="4000"></textarea>
+
+        <button class="morph-btn" id="morphBtn" aria-label="Отправить">
+          <svg class="ic ic-send" viewBox="0 0 24 24"><path d="M4.5 12h13M12 5.5 18.5 12 12 18.5"/></svg>
+          <span class="mic-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        </button>
+        <button class="icon-btn rec-cancel" id="recCancel" hidden title="Отменить запись">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+
+        <input type="file" id="fileInput" hidden>
+      </footer>
+
+      <!-- индикатор записи -->
+      <div class="rec-indicator" id="recIndicator" hidden>
+        <span class="rec-dot"></span>
+        <span class="rec-time" id="recTime">0:00</span>
+        <span class="rec-hint">отпусти и получишь голосовое</span>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- МОДАЛКА ПРОФИЛЯ -->
+<div class="overlay" id="profileOverlay" hidden>
+  <div class="modal glass-strong" id="profileModal">
+    <button class="icon-btn modal-close" id="profileClose" aria-label="Закрыть">
+      <svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+
+    <div class="profile-top">
+      <button class="avatar-editor" id="avatarEditor" title="Сменить аватарку">
+        <span class="avatar av-96" id="profileAvatar"></span>
+        <span class="avatar-edit-hint">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M12 5v14M5 12h14"/></svg>
+        </span>
+      </button>
+      <input type="file" id="avatarInput" accept="image/*" hidden>
+      <div class="profile-id">
+        <h3 id="profileDisplayName">…</h3>
+        <p class="profile-username" id="profileUsername">@…</p>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Имя</label>
+      <input id="profileNameInput" type="text" maxlength="40" placeholder="Как тебя показывать">
+    </div>
+    <div class="field">
+      <label>О себе</label>
+      <input id="profileBioInput" type="text" maxlength="140" placeholder="Пара слов о тебе">
+    </div>
+
+    <div class="profile-actions">
+      <button class="btn-primary" id="profileSave"><span>Сохранить</span><span class="btn-shine" aria-hidden="true"></span></button>
+      <button class="btn-ghost" id="logoutBtn">Выйти</button>
+    </div>
+    <p class="profile-hint">Нажми на аватарку, чтобы загрузить новую</p>
+  </div>
+</div>
+
+<!-- МОДАЛКА ПРОФИЛЯ ДРУГА -->
+<div class="overlay" id="peerOverlay" hidden>
+  <div class="modal glass-strong peer-modal">
+    <button class="icon-btn modal-close" id="peerClose" aria-label="Закрыть">
+      <svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <div class="profile-top">
+      <span class="avatar av-96" id="peerBigAvatar"></span>
+      <div class="profile-id">
+        <h3 id="peerBigName">…</h3>
+        <p class="profile-username" id="peerBigUsername">@…</p>
+        <p class="peer-big-status" id="peerBigStatus"></p>
+        <p class="peer-bio" id="peerBigBio" hidden></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ПРОСМОТР ФОТО -->
+<div class="lightbox" id="lightbox" hidden>
+  <button class="icon-btn lightbox-close" id="lightboxClose" aria-label="Закрыть">
+    <svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+  <a class="lightbox-dl" id="lightboxDl" download title="Скачать">
+    <svg viewBox="0 0 24 24" class="ic"><path d="M12 4v11M7 10.5 12 15.5l5-5M5 19h14"/></svg>
+  </a>
+  <img id="lightboxImg" alt="Фото">
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

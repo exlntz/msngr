@@ -1,0 +1,15 @@
+{
+  "name": "opal-messenger",
+  "version": "1.0.0",
+  "description": "Опал — мессенджер из жидкого стекла: приватные чаты, фото, файлы, голосовые",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
