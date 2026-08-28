@@ -1111,8 +1111,40 @@ $('menuPhoto').onclick = () => {
   $('attachMenu').hidden = true; $('attachBtn').classList.remove('open');
   const inp = $('fileInput');
   inp.accept = 'image/*';
-  inp.onchange = () => { pickFile(inp.files[0], 'image'); inp.value = ''; };
+  inp.onchange = () => {
+    const f = inp.files && inp.files[0];
+    inp.value = '';
+    if (f) pickFile(f, 'image');
+  };
   inp.click();
+  // подсказка: если диалог не открылся (встроенные вьюверы его не поддерживают),
+  // фото можно перетащить в чат или вставить из буфера
+  setTimeout(() => {
+    if (!state.pendingFile) {
+      toast('Диалог не открылся? Перетащи фото в чат или нажми Ctrl+V');
+    }
+  }, 2500);
+};
+
+// «Вставить из буфера» — работает даже там, где системный диалог файлов недоступен
+$('menuClipboard').onclick = async () => {
+  $('attachMenu').hidden = true; $('attachBtn').classList.remove('open');
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.read) throw new Error('unsupported');
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const type = item.types.find(t => t.startsWith('image/'));
+      if (type) {
+        const blob = await item.getType(type);
+        const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg';
+        pickFile(new File([blob], 'clipboard.' + ext, { type }), 'image');
+        return;
+      }
+    }
+    toast('В буфере нет картинки', true);
+  } catch {
+    toast('Скопируй картинку и нажми Ctrl+V в поле сообщения', true);
+  }
 };
 $('menuFile').onclick = () => {
   $('attachMenu').hidden = true; $('attachBtn').classList.remove('open');
@@ -1133,11 +1165,13 @@ msgInput.addEventListener('paste', (e) => {
     }
   }
 });
-messagesScroll.addEventListener('dragover', (e) => e.preventDefault());
-messagesScroll.addEventListener('drop', (e) => {
+// drag&drop: принимаем на всё окно чата, файл по промаху не «открывается» вкладкой
+document.addEventListener('dragover', (e) => { e.preventDefault(); });
+document.addEventListener('drop', (e) => {
   e.preventDefault();
-  const f = e.dataTransfer.files?.[0];
-  if (f) pickFile(f, f.type.startsWith('image/') ? 'image' : 'file');
+  if (!state.activeChat) return;
+  const f = e.dataTransfer?.files?.[0];
+  if (f) pickFile(f, f.type && f.type.startsWith('image/') ? 'image' : 'file');
 });
 
 async function pickFile(file, kind) {
@@ -1146,11 +1180,24 @@ async function pickFile(file, kind) {
 
   let blob = file;
   let name = file.name || 'photo.jpg';
-  if (kind === 'image' && file.size > 3 * 1024 * 1024) {
-    try {
-      blob = await downscaleImage(file);
-      name = name.replace(/\.[^.]+$/, '') + '.jpg';
-    } catch {}
+  if (kind === 'image') {
+    const t = (file.type || '').toLowerCase();
+    // heic/svg/неизвестный тип браузер не покажет как <img> — пробуем пережать в JPEG
+    const needsConvert = !t.startsWith('image/') || ['image/heic', 'image/heif', 'image/svg+xml'].includes(t);
+    if (needsConvert || file.size > 3 * 1024 * 1024) {
+      try {
+        const converted = await downscaleImage(file);
+        if (converted && converted.size > 0) {
+          blob = converted;
+          name = name.replace(/\.[^.]+$/, '') + '.jpg';
+          if (needsConvert) toast('Конвертировал в JPEG для превью');
+        } else if (needsConvert) {
+          kind = 'file';
+        }
+      } catch {
+        if (needsConvert) { kind = 'file'; toast('Этот формат не превьюится — отправлю файлом'); }
+      }
+    }
   }
 
   const previewUrl = kind === 'image' ? URL.createObjectURL(blob) : null;
@@ -1222,12 +1269,12 @@ async function sendPendingFile(caption) {
     reply: state.replyTo ? { id: state.replyTo.id, sender_name: state.replyTo.sender_name, preview: state.replyTo.preview } : null,
     created_at: Date.now(), client_tag: tag,
   };
+  optimistic._localUrl = pf.previewUrl;
   pushOptimistic(chatId, optimistic);
   soundSend();
   scrollToBottom();
 
-  // скрыть attach bar сразу
-  if (pf.previewUrl) URL.revokeObjectURL(pf.previewUrl);
+  // attach bar убираем сразу; локальное превью живёт, пока не придёт эхо (иначе пузырь станет битой картинкой)
   state.pendingFile = null;
   renderAttachBar();
   msgInput.value = '';
@@ -1247,9 +1294,12 @@ async function sendPendingFile(caption) {
       },
     });
     state.sending = false;
+    // эхо уже подменило картинку на серверную — локальный objectURL больше не нужен
+    if (optimistic._localUrl) setTimeout(() => URL.revokeObjectURL(optimistic._localUrl), 5000);
   } catch (ex) {
     state.sending = false;
     removeOptimistic(tag);
+    if (optimistic._localUrl) URL.revokeObjectURL(optimistic._localUrl);
     toast('Не удалось отправить: ' + ex.message, true);
   }
 }
