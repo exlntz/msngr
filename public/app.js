@@ -319,6 +319,7 @@ function handleWS(d) {
     }
     case 'profile:update': onProfileUpdate(d.user); break;
     case 'message:delete': onMessageDelete(d); break;
+    case 'call': if (window.__handleCallSignal) window.__handleCallSignal(d); break;
   }
 }
 

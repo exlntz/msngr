@@ -613,8 +613,10 @@ const server = http.createServer(async (req, res) => {
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 wss.on('connection', (ws, req) => {
+  // авторизация: cookie или ?token= (для встраиваемых клиентов и тестов)
+  const wsUrl = new URL(req.url, 'http://x');
   const cookies = parseCookies(req);
-  const user = getUserByToken(cookies['opal_token']);
+  const user = getUserByToken(wsUrl.searchParams.get('token') || cookies['opal_token']);
   if (!user) { ws.close(4001, 'unauthorized'); return; }
 
   ws.userId = user.id;
@@ -636,6 +638,24 @@ wss.on('connection', (ws, req) => {
       for (const uid of chatMemberIds(Number(data.chat_id))) {
         if (uid !== user.id) sendToUser(uid, { type: 'typing', chat_id: Number(data.chat_id), user_id: user.id });
       }
+    } else if (data.type === 'call' && data.action && data.to) {
+      // сигналинг звонков (WebRTC): адресная пересылка между двумя юзерами одного чата
+      const toId = Number(data.to);
+      if (toId === user.id || !Number.isInteger(toId)) return;
+      const shared = db.prepare(`
+        SELECT 1 FROM chat_members m1
+        JOIN chat_members m2 ON m2.chat_id = m1.chat_id AND m2.user_id = ?
+        WHERE m1.user_id = ? LIMIT 1
+      `).get(toId, user.id);
+      if (!shared) return;
+      const set = socketsByUser.get(toId);
+      if (!set || !set.size) {
+        wsSend(ws, { type: 'call', action: 'error', reason: 'offline', call_id: data.call_id });
+        return;
+      }
+      const payload = { type: 'call', action: String(data.action).slice(0, 16), call_id: String(data.call_id || '').slice(0, 64), from: user.id };
+      if (data.data !== undefined) payload.data = data.data;
+      for (const w of set) wsSend(w, payload);
     } else if (data.type === 'ping') {
       touchLastSeen(user.id);
       wsSend(ws, { type: 'pong' });

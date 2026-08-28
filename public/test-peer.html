@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Опал — тестовый собеседник</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0b0e14; color: #dfe6ee; padding: 30px; }
+  .card { max-width: 560px; margin: 0 auto; background: #141926; border-radius: 16px; padding: 26px; line-height: 1.6; }
+  .ok { color: #7fe8a2; } .bad { color: #ff8f8f; }
+  code { background: #0d1119; padding: 2px 7px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>◆ Тестовый собеседник</h2>
+  <p id="status">Подключение…</p>
+  <p style="opacity:.6; font-size: 13px;">Открой с токеном: <code>test-peer.html?token=…</code><br>
+  Автоматически отвечает на звонки: шлёт видео 60 FPS (анимированный холст) и тихий аудио-тон.</p>
+  <p id="extra"></p>
+</div>
+<script>
+'use strict';
+const qs = new URLSearchParams(location.search);
+const token = qs.get('token');
+const status = document.getElementById('status');
+const extra = document.getElementById('extra');
+if (!token) {
+  status.innerHTML = '<span class="bad">Нет токена. Открой test-peer.html?token=…</span>';
+} else {
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws?token=' + token);
+
+  // видео: анимированный холст, реальный captureStream(60)
+  const canvas = document.createElement('canvas');
+  canvas.width = 1280; canvas.height = 720;
+  const g = canvas.getContext('2d');
+  let frame = 0;
+  (function draw() {
+    frame++;
+    const t = frame / 60;
+    const grd = g.createLinearGradient(0, 0, 1280, 720);
+    grd.addColorStop(0, `hsl(${(t * 36) % 360} 75% 52%)`);
+    grd.addColorStop(1, `hsl(${(t * 36 + 130) % 360} 75% 42%)`);
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 1280, 720);
+    g.fillStyle = 'rgba(255,255,255,.95)';
+    g.font = 'bold 130px sans-serif';
+    g.fillText('60 FPS DEMO', 240, 340);
+    g.font = 'bold 90px sans-serif';
+    g.fillText('кадр ' + frame, 400, 470);
+    requestAnimationFrame(draw);
+  })();
+  const videoTrack = canvas.captureStream(60).getVideoTracks()[0];
+
+  // аудио: тихий тон
+  const actx = new AudioContext();
+  const dest = actx.createMediaStreamDestination();
+  const osc = actx.createOscillator();
+  osc.frequency.value = 300;
+  const og = actx.createGain();
+  og.gain.value = 0.02;
+  osc.connect(og).connect(dest);
+  osc.start();
+  const audioTrack = dest.stream.getAudioTracks()[0];
+
+  let pc = null, callId = null, fromId = null;
+  const send = (o) => ws.send(JSON.stringify(o));
+  const AUTO_CALL = qs.get('autocall');   // id пользователя, которому позвонить
+  const WANT_SCREEN = qs.get('screen') === '1';
+  const WANT_CAM = qs.get('cam') === '1';
+
+  let previewVideo = null;
+  if (AUTO_CALL) {
+    previewVideo = document.createElement('video');
+    previewVideo.autoplay = true; previewVideo.muted = true; previewVideo.playsInline = true;
+    previewVideo.style.cssText = 'width:100%;border-radius:12px;margin-top:14px;background:#000;aspect-ratio:16/9;object-fit:contain';
+    document.querySelector('.card').appendChild(previewVideo);
+  }
+
+  let localScreen = null, localCam = null;
+  async function attachShare(p) {
+    // демонстрация экрана через getDisplayMedia (в Chrome с флагом авто-выбора — без диалога)
+    try {
+      const disp = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 60, max: 60 } },
+        audio: false,
+      });
+      localScreen = disp.getVideoTracks()[0];
+      try { localScreen.contentHint = 'motion'; } catch {}
+      const sender = p.getTransceivers().find(t => t.receiver.track?.kind === 'video');
+      if (sender) await sender.sender.replaceTrack(localScreen);
+      extra.textContent = 'Демонстрирую свой экран: ' + JSON.stringify(localScreen.getSettings().width || '') ;
+      return true;
+    } catch (e) {
+      extra.textContent = 'getDisplayMedia: ' + e.name;
+      return false;
+    }
+  }
+
+  ws.onopen = async () => {
+    status.innerHTML = '<span class="ok">Готов.</span>';
+    if (!AUTO_CALL) return;
+    // режим «позвонить первому»: приглашение пользователю autocall
+    const peerPc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    window.__pc = peerPc;
+    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
+    peerPc.addTransceiver((audioStream && audioStream.getAudioTracks()[0]) || 'audio', { direction: 'sendrecv' });
+    peerPc.addTransceiver('video', { direction: 'sendrecv' });
+    const myCall = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    peerPc.onicecandidate = (ev) => ev.candidate && send({ type: 'call', action: 'ice', to: Number(AUTO_CALL), call_id: myCall, data: { candidate: ev.candidate.toJSON() } });
+    peerPc.ontrack = (ev) => {
+      if (ev.track.kind === 'video' && previewVideo) previewVideo.srcObject = new MediaStream([ev.track]);
+    };
+    peerPc.onconnectionstatechange = () => {
+      extra.textContent = 'Соединение: ' + peerPc.connectionState;
+      if (peerPc.connectionState === 'connected' && WANT_SCREEN) {
+        setTimeout(() => attachShare(peerPc), 1500);
+      }
+    };
+    const offer = await peerPc.createOffer();
+    await peerPc.setLocalDescription(offer);
+    send({ type: 'call', action: 'invite', to: Number(AUTO_CALL), call_id: myCall, data: { sdp: peerPc.localDescription } });
+    status.innerHTML = '<span class="ok">Звоню пользователю #' + AUTO_CALL + '…</span>';
+    // приём ICE от абонента
+    ws.addEventListener('message', async (e) => {
+      const d = JSON.parse(e.data);
+      if (d.type === 'call' && d.action === 'ice' && d.call_id === myCall) {
+        try { await peerPc.addIceCandidate(d.data.candidate); } catch {}
+      }
+      if (d.type === 'call' && d.action === 'accept' && d.call_id === myCall) {
+        await peerPc.setRemoteDescription(d.data.sdp);
+        if (WANT_CAM) {
+          try {
+            const cam = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, frameRate: 30 } });
+            localCam = cam.getVideoTracks()[0];
+            const sender = peerPc.getTransceivers().find(t => t.receiver.track?.kind === 'video');
+            if (sender) await sender.sender.replaceTrack(localCam);
+          } catch {}
+        }
+      }
+    });
+  };
+
+  ws.onmessage = async (e) => {
+    const d = JSON.parse(e.data);
+    if (d.type !== 'call') return;
+    if (d.action === 'invite' && !pc) {
+      callId = d.call_id; fromId = d.from;
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      window.__pc = pc;
+      pc.onicecandidate = (ev) => ev.candidate && send({ type: 'call', action: 'ice', to: fromId, call_id: callId, data: { candidate: ev.candidate.toJSON() } });
+      await pc.setRemoteDescription(d.data.sdp);
+      for (const t of pc.getTransceivers()) {
+        const kind = t.receiver.track ? t.receiver.track.kind : null;
+        // транксиверы из чужого offer по умолчанию recvonly — включаем отправку
+        t.direction = 'sendrecv';
+        if (kind === 'audio') await t.sender.replaceTrack(audioTrack);
+        if (kind === 'video') await t.sender.replaceTrack(videoTrack);
+      }
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      send({ type: 'call', action: 'accept', to: fromId, call_id: callId, data: { sdp: pc.localDescription } });
+      status.innerHTML = '<span class="ok">В звонке. Отправляю видео 60 FPS.</span>';
+      pc.onconnectionstatechange = () => {
+        extra.textContent = 'Соединение: ' + pc.connectionState;
+        if (['failed', 'closed'].includes(pc.connectionState)) {
+          pc = null;
+          status.innerHTML = '<span class="ok">Звонок завершён. Жду новый…</span>';
+        }
+      };
+    } else if (d.action === 'ice' && pc && d.call_id === callId) {
+      try { await pc.addIceCandidate(d.data.candidate); } catch {}
+    } else if (d.action === 'end' && pc && d.call_id === callId) {
+      pc.close(); pc = null;
+      status.innerHTML = '<span class="ok">Звонок завершён. Жду новый…</span>';
+    }
+  };
+}
+</script>
+</body>
+</html>
